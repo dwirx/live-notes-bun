@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-time Notes</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      background-color: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      color: #333;
+    }
+    .container {
+      width: 90%;
+      max-width: 800px;
+      height: 90vh;
+      background-color: white;
+      border-radius: 12px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+      display: flex;
+      flex-direction: column;
+    }
+    h1 {
+      font-size: 1.5rem;
+      padding: 1rem 1.5rem;
+      margin: 0;
+      border-bottom: 1px solid #e0e0e0;
+      color: #1a1a1a;
+    }
+    #notes-area {
+      flex-grow: 1;
+      font-family: 'Menlo', 'Consolas', monospace;
+      font-size: 1rem;
+      padding: 1.5rem;
+      border: none;
+      outline: none;
+      resize: none;
+      line-height: 1.6;
+      background-color: transparent;
+    }
+    .status {
+      padding: 0.5rem 1.5rem;
+      font-size: 0.8rem;
+      color: #666;
+      border-top: 1px solid #e0e0e0;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Real-time Notes</h1>
+    <textarea id="notes-area" placeholder="Start typing here..."></textarea>
+    <div class="status" id="status">Connecting...</div>
+  </div>
+
+  <script>
+    const notesArea = document.getElementById('notes-area');
+    const statusDiv = document.getElementById('status');
+    
+    const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+    ws.onopen = () => {
+      console.log('Connected to WebSocket');
+      statusDiv.textContent = 'Connected';
+    };
+
+    ws.onmessage = (event) => {
+      // Avoid resetting cursor position if the content is the same
+      if (notesArea.value !== event.data) {
+        const cursorPos = notesArea.selectionStart;
+        notesArea.value = event.data;
+        notesArea.selectionStart = notesArea.selectionEnd = cursorPos;
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('Disconnected from WebSocket');
+      statusDiv.textContent = 'Disconnected. Please refresh.';
+      statusDiv.style.color = 'red';
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket Error:', error);
+      statusDiv.textContent = 'Connection Error';
+      statusDiv.style.color = 'red';
+    };
+
+    notesArea.addEventListener('input', () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(notesArea.value);
+      }
+    });
+  </script>
+</body>
+</html>
