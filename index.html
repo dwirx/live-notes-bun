@@ -32,8 +32,11 @@
       border-bottom: 1px solid #e0e0e0;
       color: #1a1a1a;
     }
-    #notes-area {
+    .notes-wrapper {
+      position: relative;
       flex-grow: 1;
+    }
+    #notes-display, #notes-area {
       font-family: 'Menlo', 'Consolas', monospace;
       font-size: 1rem;
       padding: 1.5rem;
@@ -41,6 +44,40 @@
       outline: none;
       resize: none;
       line-height: 1.6;
+      width: calc(100% - 3rem);
+      height: calc(100% - 3rem);
+      position: absolute;
+      top: 0;
+      left: 0;
+      margin: 0;
+      box-sizing: border-box;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    #notes-display {
+      z-index: 2;
+      pointer-events: none;
+    }
+    #notes-display a, #notes-display .copyable-text {
+      pointer-events: auto;
+    }
+    #notes-display a {
+      color: #007bff;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .copyable-text {
+      background-color: #e9ecef;
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    .copyable-text:hover {
+      background-color: #d0d6db;
+    }
+    #notes-area {
+      z-index: 1;
       background-color: transparent;
     }
     .status {
@@ -50,20 +87,75 @@
       border-top: 1px solid #e0e0e0;
       text-align: right;
     }
+    #clear-button {
+      background-color: #ff4d4d;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      margin: 0.5rem 1.5rem;
+      border-radius: 5px;
+      cursor: pointer;
+      align-self: flex-end;
+    }
+    #clear-button:hover {
+      background-color: #e60000;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Real-time Notes</h1>
-    <textarea id="notes-area" placeholder="Start typing here..."></textarea>
+    <div class="notes-wrapper">
+      <div id="notes-display"></div>
+      <textarea id="notes-area" placeholder="Start typing here..."></textarea>
+    </div>
     <div class="status" id="status">Connecting...</div>
+    <button id="clear-button">Clear All Notes</button>
   </div>
 
   <script>
     const notesArea = document.getElementById('notes-area');
+    const notesDisplay = document.getElementById('notes-display');
     const statusDiv = document.getElementById('status');
+    const clearButton = document.getElementById('clear-button');
     
     const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+    function formatText(text) {
+      let processedText = text;
+
+      const copyRegex = /`([^`]+)`/g;
+      processedText = processedText.replace(copyRegex, '<span class="copyable-text" title="Klik untuk menyalin">$1</span>');
+
+      const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])|(\bwww\.[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+      processedText = processedText.replace(urlRegex, function(url) {
+        let href = url;
+        if (!href.match(/^(https?|ftp|file):\/\//)) {
+          href = 'http://' + href;
+        }
+        return `<a href="${href}" target="_blank" title="Klik untuk membuka tautan">${url}</a>`;
+      });
+      
+      return processedText;
+    }
+
+    function updateNotesDisplay(content) {
+        notesDisplay.innerHTML = formatText(content);
+    }
+    
+    function syncScroll() {
+        notesDisplay.scrollTop = notesArea.scrollTop;
+        notesDisplay.scrollLeft = notesArea.scrollLeft;
+    }
+
+    function handleInput() {
+      const content = notesArea.value;
+      updateNotesDisplay(content);
+      syncScroll();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(content);
+      }
+    }
 
     ws.onopen = () => {
       console.log('Connected to WebSocket');
@@ -71,12 +163,14 @@
     };
 
     ws.onmessage = (event) => {
-      // Avoid resetting cursor position if the content is the same
-      if (notesArea.value !== event.data) {
+      const content = event.data;
+      if (notesArea.value !== content) {
         const cursorPos = notesArea.selectionStart;
-        notesArea.value = event.data;
+        notesArea.value = content;
         notesArea.selectionStart = notesArea.selectionEnd = cursorPos;
       }
+      updateNotesDisplay(content);
+      syncScroll();
     };
 
     ws.onclose = () => {
@@ -91,9 +185,40 @@
       statusDiv.style.color = 'red';
     };
 
-    notesArea.addEventListener('input', () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(notesArea.value);
+    notesArea.addEventListener('input', handleInput);
+    notesArea.addEventListener('scroll', syncScroll);
+    notesArea.addEventListener('paste', () => {
+        setTimeout(handleInput, 1);
+    });
+
+    notesDisplay.addEventListener('click', (event) => {
+        const link = event.target.closest('a');
+        if (link) {
+            return;
+        }
+
+        const copyableSpan = event.target.closest('.copyable-text');
+        if (copyableSpan) {
+            const textToCopy = copyableSpan.innerText;
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalInnerHtml = copyableSpan.innerHTML;
+                copyableSpan.innerText = 'Disalin!';
+                copyableSpan.style.backgroundColor = '#a0e8a0';
+                setTimeout(() => {
+                    copyableSpan.innerHTML = originalInnerHtml;
+                    copyableSpan.style.backgroundColor = '';
+                }, 1200);
+            }).catch(err => {
+                console.error('Gagal menyalin teks:', err);
+            });
+        }
+    });
+
+    clearButton.addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear all notes?')) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send('clear');
+        }
       }
     });
   </script>

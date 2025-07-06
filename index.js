@@ -1,5 +1,7 @@
-// In-memory store for the notes content
-let currentNotes = "";
+const notesFile = Bun.file("./notes.txt");
+
+// Read notes from the file, or start with an empty string if it doesn't exist.
+let currentNotes = await notesFile.exists() ? await notesFile.text() : "";
 
 // A set to keep track of all connected WebSocket clients
 const clients = new Set();
@@ -8,7 +10,7 @@ const server = Bun.serve({
   port: 3000,
   
   // This function handles incoming HTTP requests
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url);
 
     // Check if the client is requesting to upgrade to a WebSocket connection
@@ -41,18 +43,31 @@ const server = Bun.serve({
     },
 
     // This function is called when a message is received from a client
-    message(ws, message) {
-      // The message is the updated notes content.
-      // We assume the message is a string for this simple app.
-      currentNotes = message;
-      
-      // Broadcast the updated notes to all other connected clients
-      for (const client of clients) {
-        // Check if the client is not the one who sent the message and is ready
-        if (client !== ws && client.readyState === WebSocket.OPEN) {
-          client.send(currentNotes);
+    async message(ws, message) {
+      // Handle the clear message
+      if (message === 'clear') {
+        currentNotes = "";
+        // Broadcast the empty notes to all clients
+        for (const client of clients) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(currentNotes);
+          }
+        }
+      } else {
+        // The message is the updated notes content.
+        currentNotes = message.toString();
+        
+        // Broadcast the updated notes to all other connected clients
+        for (const client of clients) {
+          // Check if the client is not the one who sent the message and is ready
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(currentNotes);
+          }
         }
       }
+      
+      // Persist the changes to the file
+      await Bun.write(notesFile, currentNotes);
     },
 
     // This function is called when a WebSocket connection is closed
